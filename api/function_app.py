@@ -1,39 +1,58 @@
 import azure.functions as func
 import json
 import os
-import pyodbc
+import pymssql
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 @app.route(route="socios")
 def obtener_socios(req: func.HttpRequest) -> func.HttpResponse:
-    # 1. Leer la cadena secreta de las variables de entorno de Azure
-    connection_string = os.environ.get("SQL_CONNECTION_STRING")
-    
-    if not connection_string:
+    # 1. Leer parámetros o cadena de conexión
+    conn_str = os.environ.get("SQL_CONNECTION_STRING", "")
+
+    # Parsear los parámetros de la cadena de conexión
+    params = {}
+    for part in conn_str.split(";"):
+        if "=" in part:
+            k, v = part.split("=", 1)
+            params[k.strip().lower()] = v.strip().strip("{}")
+
+    # Extraer servidor (limpiando prefijo tcp: y puerto)
+    server = params.get("server", "").replace("tcp:", "").split(",")[0]
+    user = params.get("uid", "") or params.get("user id", "")
+    password = params.get("pwd", "") or params.get("password", "")
+    database = params.get("database", "") or params.get("initial catalog", "")
+
+    if not server or not password:
         return func.HttpResponse(
-            body=json.dumps({"error": "No se encontró la variable SQL_CONNECTION_STRING"}),
+            body=json.dumps({"error": "Configuración de conexión incompleta en las variables de entorno"}),
             mimetype="application/json",
             status_code=500
         )
 
     try:
-        # 2. Conectar a Azure SQL Database
-        conn = pyodbc.connect(connection_string)
+        # 2. Conectar directamente a Azure SQL Database sin depender de drivers ODBC
+        conn = pymssql.connect(
+            server=server,
+            user=user,
+            password=password,
+            database=database,
+            as_dict=True
+        )
         cursor = conn.cursor()
 
-        # 3. Consultar la tabla Socios creada en el Query Editor
+        # 3. Consultar la tabla real
         cursor.execute("SELECT Id, Nombre, Email, AportacionMensual FROM Socios")
         filas = cursor.fetchall()
         conn.close()
 
-        # 4. Formatear a JSON
+        # 4. Formatear los resultados para la web
         resultado = [
             {
-                "id": fila[0],
-                "nombre": fila[1],
-                "rol": fila[2],  # mostramos el email en la columna de rol/contacto
-                "aportacion": float(fila[3])
+                "id": fila["Id"],
+                "nombre": fila["Nombre"],
+                "rol": fila["Email"],
+                "aportacion": float(fila["AportacionMensual"])
             }
             for fila in filas
         ]
