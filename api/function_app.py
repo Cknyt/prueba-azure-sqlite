@@ -7,31 +7,21 @@ app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 @app.route(route="socios")
 def obtener_socios(req: func.HttpRequest) -> func.HttpResponse:
-    # 1. Leer parámetros o cadena de conexión
-    conn_str = os.environ.get("SQL_CONNECTION_STRING", "")
+    # 1. Leer las variables limpias del entorno
+    server = os.environ.get("DB_SERVER")
+    database = os.environ.get("DB_NAME")
+    user = os.environ.get("DB_USER")
+    password = os.environ.get("DB_PASSWORD")
 
-    # Parsear los parámetros de la cadena de conexión
-    params = {}
-    for part in conn_str.split(";"):
-        if "=" in part:
-            k, v = part.split("=", 1)
-            params[k.strip().lower()] = v.strip().strip("{}")
-
-    # Extraer servidor (limpiando prefijo tcp: y puerto)
-    server = params.get("server", "").replace("tcp:", "").split(",")[0]
-    user = params.get("uid", "") or params.get("user id", "")
-    password = params.get("pwd", "") or params.get("password", "")
-    database = params.get("database", "") or params.get("initial catalog", "")
-
-    if not server or not password:
+    if not all([server, database, user, password]):
         return func.HttpResponse(
-            body=json.dumps({"error": "Configuración de conexión incompleta en las variables de entorno"}),
+            body=json.dumps({"error": "Faltan variables: revisa DB_SERVER, DB_NAME, DB_USER, DB_PASSWORD"}),
             mimetype="application/json",
             status_code=500
         )
 
     try:
-        # 2. Conectar directamente a Azure SQL Database sin depender de drivers ODBC
+        # 2. Conexión directa
         conn = pymssql.connect(
             server=server,
             user=user,
@@ -41,12 +31,12 @@ def obtener_socios(req: func.HttpRequest) -> func.HttpResponse:
         )
         cursor = conn.cursor()
 
-        # 3. Consultar la tabla real
+        # 3. Consulta a la tabla real
         cursor.execute("SELECT Id, Nombre, Email, AportacionMensual FROM Socios")
         filas = cursor.fetchall()
         conn.close()
 
-        # 4. Formatear los resultados para la web
+        # 4. Formatear resultados
         resultado = [
             {
                 "id": fila["Id"],
